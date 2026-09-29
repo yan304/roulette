@@ -40,5 +40,6 @@ Open http://localhost:3000.
 
 ## How it works
 - Signing in with Google adds your name (from your Google profile) to `participants`. You can remove or re-add it with the button on the page.
+- Admins can also type names in by hand (no Google account needed), choose how many winners one spin picks, and switch on **Only players who haven't won** to leave past winners out of the draw.
 - Only an admin, signed in at `/admin`, can press **Spin** or remove names. The server calls `spin()`, which checks the caller is in `admins`, picks a random participant, and saves it to `spins`.
 - Every open browser receives the new spin via Supabase Realtime and plays the same jumble animation, landing on the same winner.
