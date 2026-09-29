@@ -33,13 +33,42 @@ export async function leaveRoulette() {
 // The winner is chosen inside Postgres (see supabase/schema.sql) so every
 // browser sees the same result and nobody can rig it from the client.
 // spin() itself rejects non-admins; the check here just gives a clear message.
-export async function spinRoulette(): Promise<{ spin?: Spin; error?: string }> {
+export async function spinRoulette(
+  excludeWinners = false,
+  winnerCount = 1,
+): Promise<{ spins?: Spin[]; error?: string }> {
   const supabase = await createClient();
   if (!(await isAdmin(supabase))) return { error: "Only an admin can spin." };
 
-  const { data, error } = await supabase.rpc("spin");
+  const { data, error } = await supabase.rpc("spin", {
+    exclude_winners: excludeWinners,
+    winner_count: winnerCount,
+  });
   if (error) return { error: error.message };
-  return { spin: data as Spin };
+  return { spins: data as Spin[] };
+}
+
+// Admin-only: add people by name, without a Google account. Accepts several
+// names separated by commas or new lines.
+export async function addParticipants(input: string): Promise<{ error?: string; added?: number }> {
+  const supabase = await createClient();
+  if (!(await isAdmin(supabase))) return { error: "Only an admin can add names." };
+
+  const seen = new Set<string>();
+  const names = input
+    .split(/[,\n]/)
+    .map((n) => n.trim().replace(/\s+/g, " ").slice(0, 60))
+    .filter((n) => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()));
+
+  if (names.length === 0) return { error: "Type at least one name." };
+  if (names.length > 100) return { error: "Add at most 100 names at a time." };
+
+  const { error } = await supabase
+    .from("participants")
+    .insert(names.map((name) => ({ name, manual: true })));
+  revalidatePath("/");
+  revalidatePath("/admin");
+  return { error: error?.message, added: error ? 0 : names.length };
 }
 
 export async function removeParticipant(id: string) {

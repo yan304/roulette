@@ -211,11 +211,11 @@ h3 {
   }
 }
 
-/* Burst of light specks flying out from the winner's avatar */
+/* Burst of light specks flying out from the centre of the hero */
 .burst {
   position: absolute;
-  left: 32px;
-  top: 32px;
+  left: 50%;
+  top: 50%;
   pointer-events: none;
 }
 
@@ -268,4 +268,8 @@ h3 {
   .winner-pop,
   .burst span { animation: none; }
   .burst { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wheel-spin { transition: none !important; }
 }
