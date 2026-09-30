@@ -49,14 +49,14 @@ export async function spinRoulette(
 }
 
 // Admin-only: add people by name, without a Google account. Accepts several
-// names separated by commas or new lines.
+// names, one per line.
 export async function addParticipants(input: string): Promise<{ error?: string; added?: number }> {
   const supabase = await createClient();
   if (!(await isAdmin(supabase))) return { error: "Only an admin can add names." };
 
   const seen = new Set<string>();
   const names = input
-    .split(/[,\n]/)
+    .split("\n")
     .map((n) => n.trim().replace(/\s+/g, " ").slice(0, 60))
     .filter((n) => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()));
 
