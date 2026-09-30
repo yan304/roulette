@@ -41,7 +41,7 @@ export function AddNamesForm({ disabled }: { disabled: boolean }) {
             if (e.key === "Enter" && !e.shiftKey) submit(e);
           }}
           rows={1}
-          placeholder="Juan Dela Cruz, Maria Clara…"
+          placeholder="Juan Dela Cruz"
           className="glass-pill field-sizing-content max-h-40 min-h-11 flex-1 resize-none rounded-2xl !bg-slate-950/30 px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/40 focus:ring-2 focus:ring-teal-300/50"
         />
         <button
@@ -52,7 +52,7 @@ export function AddNamesForm({ disabled }: { disabled: boolean }) {
         </button>
       </div>
       <p className={`text-xs ${message?.error ? "text-rose-300" : "text-white/50"}`}>
-        {message?.text ?? "Separate several names with commas or new lines (Shift+Enter)."}
+        {message?.text ?? "Put each name on its own line (Shift+Enter)."}
       </p>
     </form>
   );

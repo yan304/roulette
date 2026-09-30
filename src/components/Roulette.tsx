@@ -527,7 +527,9 @@ export function Roulette({
             return (
               <li
                 key={p.id}
-                className={`glass flex items-center gap-2 rounded-2xl px-3 py-2.5 transition-all duration-150 ${
+                className={`glass relative flex items-center justify-center gap-2 rounded-2xl py-2.5 text-center transition-all duration-150 ${
+                  mode === "admin" ? "px-7" : "px-3"
+                } ${
                   isWinner
                     ? "scale-105 !border-teal-200/70 !bg-teal-400/25 !shadow-[0_0_40px_rgb(45_212_191/0.45)]"
                     : active
@@ -551,7 +553,7 @@ export function Roulette({
                     onClick={() => remove(p)}
                     disabled={busy || pending}
                     aria-label={`Remove ${p.name}`}
-                    className="ml-auto shrink-0 rounded-full px-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full px-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
                   >
                     ×
                   </button>
