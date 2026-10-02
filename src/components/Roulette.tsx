@@ -7,10 +7,11 @@ import {
   joinRoulette,
   leaveRoulette,
   removeParticipant,
+  resetRoulette,
   spinRoulette,
 } from "@/app/actions";
 import type { Participant, Spin } from "@/lib/types";
-import { useRouletteView } from "@/lib/use-roulette-view";
+import { useFocusMode, useRouletteView } from "@/lib/use-roulette-view";
 import { AddNamesForm } from "./AddNamesForm";
 import { Wheel, type WheelSegment } from "./Wheel";
 
@@ -66,6 +67,7 @@ export function Roulette({
   const [history, setHistory] = useState<Spin[]>(recentSpins);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [resetting, startReset] = useTransition();
   // Admin option: only draw from people who haven't won yet.
   const [excludeWinners, setExcludeWinners] = useState(false);
   // Whether the spin being shown drew only from people who hadn't won.
@@ -74,6 +76,9 @@ export function Roulette({
   const [winnerCount, setWinnerCount] = useState(1);
   // Reel or wheel; each viewer picks their own.
   const [view, setView] = useRouletteView();
+  // Focus: each draw takes over the screen until the viewer closes it.
+  const [focusMode, setFocusMode] = useFocusMode();
+  const [focusOpen, setFocusOpen] = useState(false);
   // Wheel layout from the last spin: slice order, everyone present at the
   // time, and the total rotation to land the winner under the pointer.
   const [wheel, setWheel] = useState<{
@@ -123,8 +128,24 @@ export function Roulette({
     if (!busyRef.current) {
       busyRef.current = true;
       setBusy(true);
+      if (focusMode === "on") setFocusOpen(true);
       setTimeout(() => runNextRef.current(), 250);
     }
+  }
+
+  // Forget the draw on screen and the winners seen since the page loaded,
+  // after a reset wiped the history.
+  function clearDraw() {
+    if (busyRef.current) return;
+    setOrder(null);
+    setHighlight(null);
+    setWinner(null);
+    setDrawWinners([]);
+    setDrawTotal(1);
+    setHistory([]);
+    setLastSpinExcluded(false);
+    setWheel((w) => ({ ...w, ids: null, known: [] }));
+    currentDrawRef.current = null;
   }
 
   // Jumble the names faster-then-slower, then land on the next winner.
@@ -221,9 +242,11 @@ export function Roulette({
   // the latest render's state.
   const enqueueRef = useRef(enqueue);
   const runNextRef = useRef(runNext);
+  const clearDrawRef = useRef(clearDraw);
   useEffect(() => {
     enqueueRef.current = enqueue;
     runNextRef.current = runNext;
+    clearDrawRef.current = clearDraw;
   });
 
   // Live updates: new names appear and spins play for everyone watching.
@@ -241,11 +264,34 @@ export function Roulette({
         { event: "INSERT", schema: "public", table: "spins" },
         (payload) => enqueueRef.current(payload.new as Spin),
       )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "spins" },
+        () => {
+          clearDrawRef.current();
+          router.refresh();
+        },
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
   }, [router]);
+
+  // While focused, Escape closes it and the page behind doesn't scroll.
+  useEffect(() => {
+    if (!focusOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFocusOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [focusOpen]);
 
   function spin() {
     setError(null);
@@ -261,6 +307,21 @@ export function Roulette({
     startTransition(async () => {
       const res = await (isRegistered ? leaveRoulette() : joinRoulette());
       if (res.error) setError(res.error);
+    });
+  }
+
+  function reset() {
+    if (
+      !confirm(
+        "Reset the roulette? This removes every name and all past winners, and can't be undone.",
+      )
+    )
+      return;
+    setError(null);
+    startReset(async () => {
+      const res = await resetRoulette();
+      if (res.error) setError(res.error);
+      else clearDraw();
     });
   }
 
@@ -307,13 +368,28 @@ export function Roulette({
           reelIds[(reelIndex + offset + reelIds.length) % reelIds.length],
         );
   const reelCurrent = reelAt(0);
+  const nameSize = focusOpen
+    ? "text-6xl sm:text-8xl lg:text-9xl"
+    : "text-5xl sm:text-7xl";
+  const ghostSize = focusOpen ? "text-3xl sm:text-5xl" : "text-2xl sm:text-3xl";
 
   return (
     <div className="flex w-full flex-col gap-8">
+      {focusOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-md"
+          onClick={() => setFocusOpen(false)}
+          aria-hidden
+        />
+      )}
       <section
         data-state={state}
-        className="stage glass relative flex min-h-[26rem] flex-col justify-between gap-10 overflow-hidden rounded-[2rem] p-6 sm:p-10"
+        className={`stage glass flex flex-col justify-between gap-10 overflow-hidden rounded-[2rem] p-6 sm:p-10 ${
+          focusOpen ? "fixed inset-3 z-50 sm:inset-6" : "relative min-h-[26rem]"
+        }`}
         aria-live="polite"
+        aria-modal={focusOpen || undefined}
+        role={focusOpen ? "dialog" : undefined}
       >
         <div className="flex items-center justify-between gap-4 text-sm">
           <span className="glass-pill rounded-full px-4 py-1.5">
@@ -357,6 +433,30 @@ export function Roulette({
                 </button>
               ))}
             </div>
+            {focusOpen ? (
+              <button
+                type="button"
+                onClick={() => setFocusOpen(false)}
+                className="glass-pill rounded-full px-3 py-1 text-xs transition hover:brightness-125"
+              >
+                Close
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={focusMode === "on"}
+                onClick={() => setFocusMode(focusMode === "on" ? "off" : "on")}
+                title="Show each draw full screen"
+                className={`glass-pill rounded-full px-3 py-1 text-xs transition ${
+                  focusMode === "on"
+                    ? "!bg-white/25 text-white"
+                    : "text-white/60 hover:text-white"
+                }`}
+              >
+                Focus
+              </button>
+            )}
           </div>
         </div>
 
@@ -373,15 +473,17 @@ export function Roulette({
                 className="reel my-auto flex flex-col gap-2 text-center"
                 aria-hidden
               >
-                <p className="reel-ghost truncate text-2xl font-light sm:text-3xl">
+                <p className={`reel-ghost truncate font-light ${ghostSize}`}>
                   {reelAt(-1)?.name}
                 </p>
                 <div key={tickCount} className="reel-in">
-                  <p className="text-lift truncate text-5xl font-light leading-[1.1] tracking-tight sm:text-7xl">
+                  <p
+                    className={`text-lift truncate font-light leading-[1.1] tracking-tight ${nameSize}`}
+                  >
                     {reelCurrent.name}
                   </p>
                 </div>
-                <p className="reel-ghost truncate text-2xl font-light sm:text-3xl">
+                <p className={`reel-ghost truncate font-light ${ghostSize}`}>
                   {reelAt(1)?.name}
                 </p>
               </div>
@@ -392,7 +494,9 @@ export function Roulette({
                     <span key={i} style={{ "--i": i } as React.CSSProperties} />
                   ))}
                 </div>
-                <p className="winner-name text-lift text-5xl mx-auto mt-8 font-normal leading-[1.05] tracking-tight sm:text-7xl">
+                <p
+                  className={`winner-name text-lift mx-auto ${focusOpen ? "flex flex-col justify-center h-[60vh]" : "mt-14"} font-normal leading-[1.05] tracking-tight ${nameSize}`}
+                >
                   {winner.winner_name}
                 </p>
               </div>
@@ -424,111 +528,6 @@ export function Roulette({
                 ))}
               </ol>
             )}
-
-            <div className="flex flex-wrap items-center gap-4">
-              {mode === "admin" ? (
-                <>
-                  <button
-                    onClick={spin}
-                    disabled={
-                      busy ||
-                      pending ||
-                      (excludeWinners ? eligibleCount : participants.length) ===
-                        0
-                    }
-                    className="glass-pill rounded-full !border-white/70 !bg-white/30 px-8 py-2.5 font-medium text-white !shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_0_40px_rgb(45_212_191/0.4)] transition hover:!bg-white/40 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {busy ? "Spinning…" : "Spin"}
-                  </button>
-                  <div className="flex items-center gap-2 text-sm text-white/85">
-                    <span id="winner-count-label">Winners</span>
-                    <div
-                      className="glass-pill flex items-center rounded-full"
-                      role="group"
-                      aria-labelledby="winner-count-label"
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setWinnerCount(Math.max(1, effectiveCount - 1))
-                        }
-                        disabled={busy || effectiveCount <= 1}
-                        aria-label="Fewer winners"
-                        className="h-8 w-8 rounded-full transition hover:bg-white/10 disabled:opacity-30"
-                      >
-                        −
-                      </button>
-                      <span
-                        className="w-6 text-center tabular-nums"
-                        aria-live="polite"
-                      >
-                        {effectiveCount}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setWinnerCount(
-                            Math.min(maxWinners, effectiveCount + 1),
-                          )
-                        }
-                        disabled={busy || effectiveCount >= maxWinners}
-                        aria-label="More winners"
-                        className="h-8 w-8 rounded-full transition hover:bg-white/10 disabled:opacity-30"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                  <label className="flex cursor-pointer items-center gap-3 text-sm text-white/85">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      checked={excludeWinners}
-                      onChange={(e) => {
-                        setExcludeWinners(e.target.checked);
-                        setWheel((w) => ({ ...w, ids: null }));
-                      }}
-                      disabled={busy}
-                      className="peer sr-only"
-                    />
-                    <span className="glass-pill relative h-6 w-11 shrink-0 rounded-full transition peer-checked:!bg-teal-400/50 peer-focus-visible:ring-2 peer-focus-visible:ring-teal-300/60 after:absolute after:left-0.5 after:top-0.5 after:h-[1.125rem] after:w-[1.125rem] after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-5" />
-                    Only players who haven&apos;t won
-                  </label>
-                  {excludeWinners &&
-                    eligibleCount === 0 &&
-                    participants.length > 0 && (
-                      <span className="text-sm text-rose-200">
-                        Everyone has already won.
-                      </span>
-                    )}
-                </>
-              ) : userId && !viewerIsAdmin ? (
-                <>
-                  <button
-                    onClick={toggleMembership}
-                    disabled={busy || pending}
-                    className="glass-pill rounded-full px-5 py-2.5 text-sm transition hover:brightness-125 disabled:opacity-40"
-                  >
-                    {isRegistered ? "Remove my name" : "Add my name"}
-                  </button>
-                  <span className="text-sm text-white/70">
-                    The host will spin when it&apos;s time.
-                  </span>
-                </>
-              ) : userId ? (
-                <span className="text-sm text-white/80">
-                  Spin from the admin page.
-                </span>
-              ) : (
-                <span className="text-sm text-white/80">
-                  Sign in with Google to join the draw
-                </span>
-              )}
-              <span
-                className={`ml-auto hidden h-px w-40 bg-white/50 ${view === "reel" ? "sm:block" : ""}`}
-                aria-hidden
-              />
-            </div>
           </div>
 
           {view === "wheel" && (
@@ -537,17 +536,134 @@ export function Roulette({
               rotation={wheel.rotation}
               durationMs={wheel.duration}
               spinning={spinning}
+              large={focusOpen}
             />
           )}
         </div>
       </section>
+
+      <div className="flex flex-wrap items-center gap-4">
+        {mode === "admin" ? (
+          <>
+            <button
+              onClick={spin}
+              disabled={
+                busy ||
+                pending ||
+                resetting ||
+                (excludeWinners ? eligibleCount : participants.length) === 0
+              }
+              className="glass-pill rounded-full !border-white/70 !bg-white/30 px-8 py-2.5 font-medium text-white !shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_0_40px_rgb(45_212_191/0.4)] transition hover:!bg-white/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? "Spinning…" : "Spin"}
+            </button>
+            <div className="flex items-center gap-2 text-sm text-white/85">
+              <span id="winner-count-label">Winners</span>
+              <div
+                className="glass-pill flex items-center rounded-full"
+                role="group"
+                aria-labelledby="winner-count-label"
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setWinnerCount(Math.max(1, effectiveCount - 1))
+                  }
+                  disabled={busy || effectiveCount <= 1}
+                  aria-label="Fewer winners"
+                  className="h-8 w-8 rounded-full transition hover:bg-white/10 disabled:opacity-30"
+                >
+                  −
+                </button>
+                <span
+                  className="w-6 text-center tabular-nums"
+                  aria-live="polite"
+                >
+                  {effectiveCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setWinnerCount(Math.min(maxWinners, effectiveCount + 1))
+                  }
+                  disabled={busy || effectiveCount >= maxWinners}
+                  aria-label="More winners"
+                  className="h-8 w-8 rounded-full transition hover:bg-white/10 disabled:opacity-30"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-3 text-sm text-white/85">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={excludeWinners}
+                onChange={(e) => {
+                  setExcludeWinners(e.target.checked);
+                  setWheel((w) => ({ ...w, ids: null }));
+                }}
+                disabled={busy}
+                className="peer sr-only"
+              />
+              <span className="glass-pill relative h-6 w-11 shrink-0 rounded-full transition peer-checked:!bg-teal-400/50 peer-focus-visible:ring-2 peer-focus-visible:ring-teal-300/60 after:absolute after:left-0.5 after:top-0.5 after:h-[1.125rem] after:w-[1.125rem] after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-5" />
+              Only players who haven&apos;t won
+            </label>
+            {excludeWinners &&
+              eligibleCount === 0 &&
+              participants.length > 0 && (
+                <span className="text-sm text-rose-200">
+                  Everyone has already won.
+                </span>
+              )}
+            <button
+              type="button"
+              onClick={reset}
+              disabled={busy || pending || resetting}
+              aria-busy={resetting}
+              className={`glass-pill ml-auto flex items-center gap-2 rounded-full px-5 py-2.5 text-sm text-rose-200 transition hover:!border-rose-300/60 hover:text-rose-100 ${
+                resetting ? "cursor-wait" : "disabled:opacity-40"
+              }`}
+            >
+              {resetting && (
+                <span
+                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rose-200/30 border-t-rose-200"
+                  aria-hidden
+                />
+              )}
+              {resetting ? "Resetting…" : "Reset"}
+            </button>
+          </>
+        ) : userId && !viewerIsAdmin ? (
+          <>
+            <button
+              onClick={toggleMembership}
+              disabled={busy || pending || resetting}
+              className="glass-pill rounded-full px-5 py-2.5 text-sm transition hover:brightness-125 disabled:opacity-40"
+            >
+              {isRegistered ? "Remove my name" : "Add my name"}
+            </button>
+            <span className="text-sm text-white/70">
+              The host will spin when it&apos;s time.
+            </span>
+          </>
+        ) : userId ? (
+          <span className="text-sm text-white/80">
+            Spin from the admin page.
+          </span>
+        ) : (
+          <span className="text-sm text-white/80">
+            Sign in with Google to join the draw
+          </span>
+        )}
+      </div>
 
       {error && <p className="text-sm text-rose-300">{error}</p>}
 
       <div className="grid gap-8 lg:grid-cols-[1fr_280px]">
         {(mode === "admin" || displayed.length > 0) && (
           <div className="flex flex-col gap-4">
-            {mode === "admin" && <AddNamesForm disabled={busy} />}
+            {mode === "admin" && <AddNamesForm disabled={busy || resetting} />}
             <ul className="grid grid-cols-2 content-start gap-3 sm:grid-cols-3">
               {displayed.map((p) => {
                 const active = highlight === p.id;
@@ -583,7 +699,7 @@ export function Roulette({
                     {mode === "admin" && (
                       <button
                         onClick={() => remove(p)}
-                        disabled={busy || pending}
+                        disabled={busy || pending || resetting}
                         aria-label={`Remove ${p.name}`}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full px-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
                       >

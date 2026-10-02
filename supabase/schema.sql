@@ -159,6 +159,26 @@ $$;
 revoke execute on function public.spin(boolean, integer) from public, anon;
 grant execute on function public.spin(boolean, integer) to authenticated;
 
+-- Admin-only: start over. Removes every name and all spin history.
+create or replace function public.reset_roulette()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin can reset the roulette';
+  end if;
+
+  delete from public.spins where true;
+  delete from public.participants where true;
+end;
+$$;
+
+revoke execute on function public.reset_roulette() from public, anon;
+grant execute on function public.reset_roulette() to authenticated;
+
 -- Live updates for every open browser.
 do $$
 begin
