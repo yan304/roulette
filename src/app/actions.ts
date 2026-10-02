@@ -81,6 +81,17 @@ export async function removeParticipant(id: string) {
   return { error: error?.message };
 }
 
+// Admin-only: remove every name and all spin history (see supabase/schema.sql).
+export async function resetRoulette() {
+  const supabase = await createClient();
+  if (!(await isAdmin(supabase))) return { error: "Only an admin can reset the roulette." };
+
+  const { error } = await supabase.rpc("reset_roulette");
+  revalidatePath("/");
+  revalidatePath("/admin");
+  return { error: error?.message };
+}
+
 export async function adminSignIn(
   _prev: { error?: string } | undefined,
   formData: FormData,

@@ -4,36 +4,54 @@ import { useSyncExternalStore } from "react";
 
 export type RouletteView = "reel" | "wheel";
 
-// Each viewer picks their own view; it's remembered in their browser only.
-const KEY = "roulette-view";
-const EVENT = "roulette-view-change";
-let fallback: RouletteView = "reel"; // used when storage is unavailable
+// A choice each viewer makes for themselves, remembered in their browser only.
+function storedPreference<T extends string>(
+  key: string,
+  values: readonly T[],
+  initial: T,
+) {
+  const event = `${key}-change`;
+  let fallback = initial; // used when storage is unavailable
 
-function read(): RouletteView {
-  try {
-    const stored = localStorage.getItem(KEY);
-    if (stored === "reel" || stored === "wheel") return stored;
-  } catch {}
-  return fallback;
-}
-
-function subscribe(onChange: () => void) {
-  window.addEventListener("storage", onChange);
-  window.addEventListener(EVENT, onChange);
-  return () => {
-    window.removeEventListener("storage", onChange);
-    window.removeEventListener(EVENT, onChange);
-  };
-}
-
-export function useRouletteView() {
-  const view = useSyncExternalStore(subscribe, read, () => "reel" as const);
-  const setView = (next: RouletteView) => {
-    fallback = next;
+  function read(): T {
     try {
-      localStorage.setItem(KEY, next);
+      const stored = localStorage.getItem(key);
+      if (values.includes(stored as T)) return stored as T;
     } catch {}
-    window.dispatchEvent(new Event(EVENT));
+    return fallback;
+  }
+
+  function subscribe(onChange: () => void) {
+    window.addEventListener("storage", onChange);
+    window.addEventListener(event, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(event, onChange);
+    };
+  }
+
+  return function usePreference() {
+    const value = useSyncExternalStore(subscribe, read, () => initial);
+    const setValue = (next: T) => {
+      fallback = next;
+      try {
+        localStorage.setItem(key, next);
+      } catch {}
+      window.dispatchEvent(new Event(event));
+    };
+    return [value, setValue] as const;
   };
-  return [view, setView] as const;
 }
+
+export const useRouletteView = storedPreference<RouletteView>(
+  "roulette-view",
+  ["reel", "wheel"],
+  "reel",
+);
+
+// Whether a draw takes over the whole screen while it plays.
+export const useFocusMode = storedPreference(
+  "roulette-focus",
+  ["on", "off"],
+  "off",
+);

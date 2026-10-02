@@ -14,6 +14,8 @@ type Props = {
   // How long the current spin takes to slow to a stop.
   durationMs: number;
   spinning: boolean;
+  // Fill most of the screen (focus mode).
+  large?: boolean;
 };
 
 const FILLS = [
@@ -36,7 +38,13 @@ function fontSize(count: number) {
 }
 
 // A roulette wheel of glass slices, one per name, with a fixed pointer on top.
-export function Wheel({ segments, rotation, durationMs, spinning }: Props) {
+export function Wheel({
+  segments,
+  rotation,
+  durationMs,
+  spinning,
+  large = false,
+}: Props) {
   const n = segments.length;
   const size = 360 / Math.max(n, 1);
   const text = fontSize(n);
@@ -45,7 +53,11 @@ export function Wheel({ segments, rotation, durationMs, spinning }: Props) {
     FILLS[n % 3 === 1 && i === n - 1 ? 1 : i % 3];
 
   return (
-    <div className="relative mx-auto aspect-square w-[min(78vw,340px)] shrink-0">
+    <div
+      className={`relative mx-auto aspect-square shrink-0 ${
+        large ? "w-[min(85vw,70vh)]" : "w-[min(78vw,340px)]"
+      }`}
+    >
       <svg viewBox="-112 -112 224 224" className="h-full w-full overflow-visible" role="img" aria-label="Roulette wheel">
         <g
           style={{
